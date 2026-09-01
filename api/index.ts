@@ -2,7 +2,7 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { ExpressAdapter } from '@nestjs/platform-express';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import * as express from 'express';
+import express = require('express');
 import { AppModule } from '../src/app.module';
 
 let serverPromise: Promise<express.Express> | undefined;
