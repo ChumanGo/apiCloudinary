@@ -1,19 +1,103 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ClientDataDto } from './dto/client-data.dto';
 import { CreateResourceDto } from './dto/create-resource.dto';
 import {v2} from 'cloudinary/';
 
-v2.config({
-  cloud_name: "dgsix0s9f",
-  api_key: "363567531263241",
-  api_secret: "BDhIJ46AE_PuIH_-GI6To_CaRew",
-  secure: true
-});
-
 @Injectable()
 export class ResourcesService {
 
+  private readonly allowedMimeTypes = new Set([
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'image/gif',
+  ]);
+
+  constructor() {
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+    const apiKey = process.env.CLOUDINARY_API_KEY;
+    const apiSecret = process.env.CLOUDINARY_API_SECRET;
+
+    if (cloudName && apiKey && apiSecret) {
+      v2.config({
+        cloud_name: cloudName,
+        api_key: apiKey,
+        api_secret: apiSecret,
+        secure: true,
+      });
+    }
+  }
+
+  private ensureCloudinaryConfigured() {
+    if (
+      !process.env.CLOUDINARY_CLOUD_NAME ||
+      !process.env.CLOUDINARY_API_KEY ||
+      !process.env.CLOUDINARY_API_SECRET
+    ) {
+      throw new ServiceUnavailableException(
+        'El servicio de imágenes no está configurado.',
+      );
+    }
+  }
+
+  private getClientFolder(folder?: string) {
+    const normalized = String(folder || '')
+      .trim()
+      .replace(/[^a-zA-Z0-9áéíóúüñÁÉÍÓÚÜÑ _.-]/g, '')
+      .replace(/\s+/g, ' ');
+
+    if (!normalized) {
+      throw new BadRequestException('Falta el nombre del perfil para guardar la imagen.');
+    }
+
+    return `clients/${normalized}`;
+  }
+
+  async uploadClientImage(file: Express.Multer.File, folder?: string) {
+    this.ensureCloudinaryConfigured();
+
+    if (!this.allowedMimeTypes.has(file.mimetype)) {
+      throw new BadRequestException('Formato de imagen no permitido.');
+    }
+
+    const clientFolder = this.getClientFolder(folder);
+
+    try {
+      const result = await new Promise<any>((resolve, reject) => {
+        const stream = v2.uploader.upload_stream(
+          {
+            folder: clientFolder,
+            resource_type: 'image',
+            overwrite: false,
+          },
+          (error, uploadResult) => {
+            if (error) {
+              reject(error);
+              return;
+            }
+            resolve(uploadResult);
+          },
+        );
+        stream.end(file.buffer);
+      });
+
+      return {
+        secure_url: result.secure_url,
+        public_id: result.public_id,
+      };
+    } catch (error) {
+      throw new InternalServerErrorException('No fue posible guardar la imagen.');
+    }
+  }
+
   async isClientCreated(CreateResourceDto: CreateResourceDto){
+    this.ensureCloudinaryConfigured();
     const clientName = CreateResourceDto.client_name
     return await v2.api.sub_folders(`clients`)
       .then(response => {
@@ -37,6 +121,7 @@ export class ResourcesService {
   };
   
   async getAllClientResources(client: string) {
+    this.ensureCloudinaryConfigured();
     return await v2.api
       .resources({
         type: 'upload',
@@ -50,6 +135,7 @@ export class ResourcesService {
   }
 
   async removeClientImages(dataClient: ClientDataDto) {
+    this.ensureCloudinaryConfigured();
     const client: string = dataClient.client;
     const images: Array<string> = dataClient.images;
     const path = `clients/${client}`;
